@@ -1,0 +1,14 @@
+*.o
+*.a
+*.so
+*.out
+mypipeline
+myshell
+looper
+core
+.vscode/
+.devcontainer/
+.DS_Store
+Thumbs.db
+*.log
+*.txt
