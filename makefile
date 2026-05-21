@@ -19,4 +19,4 @@ mypipeline: mypipeline.c
 .PHONY: clean
 
 clean: 
-	rm -f *.o myshell looper Printers mypipe
+	rm -f *.o myshell looper Printers mypipe mypipeline
