@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "LineParser.h"
 #include <fcntl.h>
 #include <linux/limits.h>
@@ -8,7 +9,96 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#define TERMINATED -1
+#define RUNNING 1
+#define SUSPENDED 0
+
+typedef struct process {
+    cmdLine* cmd;
+    pid_t pid;
+    int status;
+    struct process* next;
+} process;
+
+process* process_list = NULL;
 int debug_mode = 0;
+
+void addProcess(process** process_list, cmdLine* cmd, pid_t pid) {
+    process* new_proc = (process*)malloc(sizeof(process));
+    new_proc->cmd = cmd;
+    new_proc->pid = pid;
+    new_proc->status = RUNNING;
+    new_proc->next = *process_list;
+    *process_list = new_proc;
+}
+
+void updateProcessList(process** process_list) {
+    process* curr = *process_list;
+    while (curr != NULL) {
+        int status;
+        pid_t res = waitpid(curr->pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
+        if (res == -1) {
+            curr->status = TERMINATED;
+        } else if (res > 0) {
+            if (WIFEXITED(status) || WIFSIGNALED(status)) {
+                curr->status = TERMINATED;
+            } else if (WIFSTOPPED(status)) {
+                curr->status = SUSPENDED;
+            } else if (WIFCONTINUED(status)) {
+                curr->status = RUNNING;
+            }
+        }
+        curr = curr->next;
+    }
+}
+
+void printProcessList(process** process_list) {
+    updateProcessList(process_list);
+    printf("%-12s %-12s %s\n", "PID", "STATUS", "Command");
+    process* curr = *process_list;
+    process* prev = NULL;
+
+    while (curr != NULL) {
+        char* status_str = "Running";
+        if (curr->status == TERMINATED) {
+            status_str = "Terminated";
+        } else if (curr->status == SUSPENDED) {
+            status_str = "Suspended";
+        }
+
+        printf("%-12d %-12s ", curr->pid, status_str);
+        for (int i = 0; i < curr->cmd->argCount; i++) {
+            printf("%s ", curr->cmd->arguments[i]);
+        }
+        printf("\n");
+
+        if (curr->status == TERMINATED) {
+            process* to_delete = curr;
+            if (prev == NULL) {
+                *process_list = curr->next;
+                curr = curr->next;
+            } else {
+                prev->next = curr->next;
+                curr = curr->next;
+            }
+            freeCmdLines(to_delete->cmd);
+            free(to_delete);
+        } else {
+            prev = curr;
+            curr = curr->next;
+        }
+    }
+}
+
+void freeProcessList(process* process_list) {
+    process* curr = process_list;
+    while (curr != NULL) {
+        process* to_delete = curr;
+        curr = curr->next;
+        freeCmdLines(to_delete->cmd);
+        free(to_delete);
+    }
+}
 
 void execute(cmdLine* pCmdLine) {
     char* cmd = pCmdLine->arguments[0];
@@ -19,13 +109,16 @@ void execute(cmdLine* pCmdLine) {
             perror("cd failed");
         }
         return;
+    } else if (strcmp(cmd, "procs") == 0) {
+        printProcessList(&process_list);
+        return;
     } else if (strcmp(cmd, "stop") == 0) {
         if (pCmdLine->argCount < 2) {
             fprintf(stderr, "stop: missing process id\n");
             return;
         }
         int targetPid = atoi(pCmdLine->arguments[1]);
-        if (kill(targetPid, SIGTSTP) == -1) {
+        if (kill(targetPid, SIGSTOP) == -1) {
             perror("stop failed");
         }
         return;
@@ -125,8 +218,15 @@ void execute(cmdLine* pCmdLine) {
         close(pipefd[0]);
         close(pipefd[1]);
 
-        waitpid(pid1, NULL, 0);
-        waitpid(pid2, NULL, 0);
+        cmdLine* nextCmd = pCmdLine->next;
+        pCmdLine->next = NULL;
+        addProcess(&process_list, pCmdLine, pid1);
+        addProcess(&process_list, nextCmd, pid2);
+
+        if (pCmdLine->blocking) {
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
+        }
 
     } else {
         pid_t pid = fork();
@@ -170,6 +270,8 @@ void execute(cmdLine* pCmdLine) {
                     fprintf(stderr, "Mode: Background\n");
                 }
             }
+
+            addProcess(&process_list, pCmdLine, pid);
 
             if (pCmdLine->blocking) {
                 waitpid(pid, NULL, 0);
@@ -226,10 +328,24 @@ int main(int argc, char** argv) {
             break;
         }
 
+        int is_builtin = 0;
+        if (strcmp(pCmdL->arguments[0], "cd") == 0 ||
+            strcmp(pCmdL->arguments[0], "stop") == 0 ||
+            strcmp(pCmdL->arguments[0], "wakeup") == 0 ||
+            strcmp(pCmdL->arguments[0], "ice") == 0 ||
+            strcmp(pCmdL->arguments[0], "nuke") == 0 ||
+            strcmp(pCmdL->arguments[0], "procs") == 0) {
+            is_builtin = 1;
+        }
+
         execute(pCmdL);
-        freeCmdLines(pCmdL);
+
+        if (is_builtin) {
+            freeCmdLines(pCmdL);
+        }
     }
 
+    freeProcessList(process_list);
     puts("\n");
     return 0;
 }
