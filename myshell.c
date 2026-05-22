@@ -12,6 +12,18 @@
 #define TERMINATED -1
 #define RUNNING 1
 #define SUSPENDED 0
+#define HISTLEN 10
+
+typedef struct {
+    int cmd_num;
+    char *cmd_str;
+} HistoryEntry;
+
+HistoryEntry* history[HISTLEN] = {NULL};
+int head = 0;
+int tail = 0;
+int history_count = 0;
+int cmd_counter = 1;
 
 typedef struct process {
     cmdLine* cmd;
@@ -22,6 +34,51 @@ typedef struct process {
 
 process* process_list = NULL;
 int debug_mode = 0;
+
+void add_to_history(char* cmd) {
+    if (history_count == HISTLEN) {
+        free(history[head]->cmd_str);
+        free(history[head]);
+        history[head] = NULL;
+        head = (head + 1) % HISTLEN;
+    } else {
+        history_count++;
+    }
+
+    history[tail] = (HistoryEntry*)malloc(sizeof(HistoryEntry));
+    history[tail]->cmd_num = cmd_counter;
+    cmd_counter++;
+    history[tail]->cmd_str = strdup(cmd);
+    tail = (tail + 1) % HISTLEN;
+}
+
+void print_history() {
+    for (int i = 0; i < history_count; i++) {
+        int index = (head + i) % HISTLEN;
+        if (history[index] != NULL) {
+            printf("%d %s\n", history[index]->cmd_num, history[index]->cmd_str);
+        }
+    }
+}
+
+char* get_history_by_num(int num) {
+    for (int i = 0; i < history_count; i++) {
+        int index = (head + i) % HISTLEN;
+        if (history[index] != NULL && history[index]->cmd_num == num) {
+            return history[index]->cmd_str;
+        }
+    }
+    return NULL;
+}
+
+char* get_last_history() {
+    if (history_count == 0) return NULL;
+    int index = (tail - 1 + HISTLEN) % HISTLEN;
+    if (history[index] != NULL) {
+        return history[index]->cmd_str;
+    }
+    return NULL;
+}
 
 void addProcess(process** process_list, cmdLine* cmd, pid_t pid) {
     process* new_proc = (process*)malloc(sizeof(process));
@@ -298,6 +355,8 @@ int main(int argc, char** argv) {
     }
 
     while (1) {
+        updateProcessList(&process_list);
+
         if (getcwd(path, PATH_MAX) == NULL) {
             perror("getcwd error");
             exit(1);
@@ -310,6 +369,32 @@ int main(int argc, char** argv) {
         if (strcmp(input, "\n") == 0) {
             continue;
         }
+
+        input[strcspn(input, "\n")] = 0;
+        
+        if (strcmp(input, "history") == 0) {
+            print_history();
+            continue;
+        }
+
+        if (strcmp(input, "!!") == 0) {
+            char* last = get_last_history();
+            if (last == NULL) {
+                printf("Error: No history\n");
+                continue;
+            }
+            strcpy(input, last);
+        } else if (input[0] == '!') {
+            int num = atoi(input + 1);
+            char* target = get_history_by_num(num);
+            if (target == NULL) {
+                printf("Error: No such command in history\n");
+                continue;
+            }
+            strcpy(input, target);
+        }
+
+        add_to_history(input);
 
         pCmdL = parseCmdLines(input);
 
@@ -352,6 +437,12 @@ int main(int argc, char** argv) {
     }
 
     freeProcessList(process_list);
+    for (int i = 0; i < HISTLEN; i++) {
+        if (history[i] != NULL) {
+            free(history[i]->cmd_str);
+            free(history[i]);
+        }
+    }
     puts("\n");
     return 0;
 }
