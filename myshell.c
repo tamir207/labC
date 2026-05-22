@@ -238,6 +238,9 @@ void execute(cmdLine* pCmdLine) {
             return;
         }
 
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>forking…)\n");
+        }
         pid_t pid1 = fork();
         if (pid1 == -1) {
             perror("fork failed");
@@ -247,6 +250,12 @@ void execute(cmdLine* pCmdLine) {
         }
 
         if (pid1 == 0) {
+            if (debug_mode) {
+                fprintf(stderr, "(child1>redirecting stdout to the write end of the pipe…)\n");
+            }
+            if (debug_mode) {
+                fprintf(stderr, "(child1>going to execute cmd: %s)\n", pCmdLine->arguments[0]);
+            }
             if (pCmdLine->inputRedirect != NULL) {
                 int fd_in = open(pCmdLine->inputRedirect, O_RDONLY);
                 if (fd_in == -1) {
@@ -264,7 +273,17 @@ void execute(cmdLine* pCmdLine) {
                 _exit(1);
             }
         }
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>created process with id: %d)\n", (int)pid1);
+        }
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>closing the write end of the pipe…)\n");
+        }
+        close(pipefd[1]);
 
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>forking…)\n");
+        }
         pid_t pid2 = fork();
         if (pid2 == -1) {
             perror("fork failed");
@@ -274,6 +293,13 @@ void execute(cmdLine* pCmdLine) {
         }
 
         if (pid2 == 0) {
+            if (debug_mode) {
+                fprintf(stderr, "(child2>redirecting stdin to the read end of the pipe…)\n");
+            }
+            if (debug_mode) {
+                fprintf(stderr, "(child2>going to execute cmd: %s)\n", pCmdLine->next->arguments[0]);
+            }
+            
             if (pCmdLine->next->outputRedirect != NULL) {
                 int fd_out = open(pCmdLine->next->outputRedirect, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd_out == -1) {
@@ -291,7 +317,13 @@ void execute(cmdLine* pCmdLine) {
                 _exit(1);
             }
         }
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>created process with id: %d)\n", (int)pid2);
+        }
 
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>closing the read end of the pipe…)\n");
+        }
         close(pipefd[0]);
         close(pipefd[1]);
 
@@ -301,8 +333,14 @@ void execute(cmdLine* pCmdLine) {
         addProcess(&process_list, nextCmd, pid2);
 
         if (pCmdLine->blocking) {
+            if (debug_mode) {
+                fprintf(stderr, "(parent_process>waiting for child processes to terminate…)\n");
+            }
             waitpid(pid1, NULL, 0);
             waitpid(pid2, NULL, 0);
+        }
+        if (debug_mode) {
+            fprintf(stderr, "(parent_process>exiting…)\n");
         }
     } else {
         pid_t pid = fork();
@@ -336,6 +374,17 @@ void execute(cmdLine* pCmdLine) {
             }
         } else {
             addProcess(&process_list, pCmdLine, pid);
+
+            if (debug_mode) {
+                fprintf(stderr, "PID: %d\n", pid);
+                fprintf(stderr, "Executing program: %s\n", cmd);
+                if (pCmdLine->blocking) {
+                    fprintf(stderr, "Mode: Foreground\n");
+                } else {
+                    fprintf(stderr, "Mode: Background\n");
+                }
+            }
+
             if (pCmdLine->blocking) {
                 waitpid(pid, NULL, 0);
             }
