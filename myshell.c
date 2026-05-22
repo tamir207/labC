@@ -32,20 +32,31 @@ void addProcess(process** process_list, cmdLine* cmd, pid_t pid) {
     *process_list = new_proc;
 }
 
+void updateProcessStatus(process* process_list, int pid, int status) {
+    process* curr = process_list;
+    while (curr != NULL) {
+        if (curr->pid == pid) {
+            curr->status = status;
+            return;
+        }
+        curr = curr->next;
+    }
+}
+
 void updateProcessList(process** process_list) {
     process* curr = *process_list;
     while (curr != NULL) {
         int status;
         pid_t res = waitpid(curr->pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
         if (res == -1) {
-            curr->status = TERMINATED;
+            updateProcessStatus(*process_list, curr->pid, TERMINATED);
         } else if (res > 0) {
             if (WIFEXITED(status) || WIFSIGNALED(status)) {
-                curr->status = TERMINATED;
+                updateProcessStatus(*process_list, curr->pid, TERMINATED);
             } else if (WIFSTOPPED(status)) {
-                curr->status = SUSPENDED;
+                updateProcessStatus(*process_list, curr->pid, SUSPENDED);
             } else if (WIFCONTINUED(status)) {
-                curr->status = RUNNING;
+                updateProcessStatus(*process_list, curr->pid, RUNNING);
             }
         }
         curr = curr->next;
