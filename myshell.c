@@ -113,6 +113,7 @@ void freeProcessList(process* process_list) {
 
 void execute(cmdLine* pCmdLine) {
     char* cmd = pCmdLine->arguments[0];
+
     if (strcmp(cmd, "cd") == 0) {
         if (pCmdLine->argCount < 2) {
             fprintf(stderr, "cd: missing argument\n");
@@ -129,8 +130,10 @@ void execute(cmdLine* pCmdLine) {
             return;
         }
         int targetPid = atoi(pCmdLine->arguments[1]);
-        if (kill(targetPid, SIGSTOP) == -1) {
+        if (kill(targetPid, SIGTSTP) == -1) {
             perror("stop failed");
+        } else {
+            updateProcessStatus(process_list, targetPid, SUSPENDED);
         }
         return;
     } else if (strcmp(cmd, "wakeup") == 0) {
@@ -141,6 +144,8 @@ void execute(cmdLine* pCmdLine) {
         int targetPid = atoi(pCmdLine->arguments[1]);
         if (kill(targetPid, SIGCONT) == -1) {
             perror("wakeup failed");
+        } else {
+            updateProcessStatus(process_list, targetPid, RUNNING);
         }
         return;
     } else if (strcmp(cmd, "ice") == 0) {
@@ -151,6 +156,8 @@ void execute(cmdLine* pCmdLine) {
         int targetPid = atoi(pCmdLine->arguments[1]);
         if (kill(targetPid, SIGINT) == -1) {
             perror("ice failed");
+        } else {
+            updateProcessStatus(process_list, targetPid, TERMINATED);
         }
         return;
     } else if (strcmp(cmd, "nuke") == 0) {
@@ -161,6 +168,8 @@ void execute(cmdLine* pCmdLine) {
         int targetPid = atoi(pCmdLine->arguments[1]);
         if (kill(-targetPid, SIGKILL) == -1) {
             perror("nuke failed");
+        } else {
+            updateProcessStatus(process_list, targetPid, TERMINATED);
         }
         return;
     }
@@ -175,6 +184,8 @@ void execute(cmdLine* pCmdLine) {
         pid_t pid1 = fork();
         if (pid1 == -1) {
             perror("fork failed");
+            close(pipefd[0]);
+            close(pipefd[1]);
             return;
         }
 
@@ -188,11 +199,9 @@ void execute(cmdLine* pCmdLine) {
                 dup2(fd_in, STDIN_FILENO);
                 close(fd_in);
             }
-
             dup2(pipefd[1], STDOUT_FILENO);
             close(pipefd[1]);
             close(pipefd[0]);
-
             if (execvp(pCmdLine->arguments[0], pCmdLine->arguments) == -1) {
                 perror("Execution failed");
                 _exit(1);
@@ -202,6 +211,8 @@ void execute(cmdLine* pCmdLine) {
         pid_t pid2 = fork();
         if (pid2 == -1) {
             perror("fork failed");
+            close(pipefd[0]);
+            close(pipefd[1]);
             return;
         }
 
@@ -215,11 +226,9 @@ void execute(cmdLine* pCmdLine) {
                 dup2(fd_out, STDOUT_FILENO);
                 close(fd_out);
             }
-
             dup2(pipefd[0], STDIN_FILENO);
             close(pipefd[0]);
             close(pipefd[1]);
-
             if (execvp(pCmdLine->next->arguments[0], pCmdLine->next->arguments) == -1) {
                 perror("Execution failed");
                 _exit(1);
@@ -238,7 +247,6 @@ void execute(cmdLine* pCmdLine) {
             waitpid(pid1, NULL, 0);
             waitpid(pid2, NULL, 0);
         }
-
     } else {
         pid_t pid = fork();
         if (pid == -1) {
@@ -256,7 +264,6 @@ void execute(cmdLine* pCmdLine) {
                 dup2(fd_in, STDIN_FILENO);
                 close(fd_in);
             }
-
             if (pCmdLine->outputRedirect != NULL) {
                 int fd_out = open(pCmdLine->outputRedirect, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd_out == -1) {
@@ -266,24 +273,12 @@ void execute(cmdLine* pCmdLine) {
                 dup2(fd_out, STDOUT_FILENO);
                 close(fd_out);
             }
-
             if (execvp(cmd, pCmdLine->arguments) == -1) {
                 perror("Execution failed");
                 _exit(1);
             }
         } else {
-            if (debug_mode) {
-                fprintf(stderr, "PID: %d\n", pid);
-                fprintf(stderr, "Executing program: %s\n", cmd);
-                if (pCmdLine->blocking) {
-                    fprintf(stderr, "Mode: Foreground\n");
-                } else {
-                    fprintf(stderr, "Mode: Background\n");
-                }
-            }
-
             addProcess(&process_list, pCmdLine, pid);
-
             if (pCmdLine->blocking) {
                 waitpid(pid, NULL, 0);
             }

@@ -6,17 +6,18 @@
 
 void handler(int sig)
 {
-	printf("\nRecieved Signal : %s\n", strsignal(sig));
-	fflush(stdout);
-
 	if (sig == SIGTSTP) {
+		printf("\nLooper handling SIGTSTP\n");
 		signal(SIGTSTP, SIG_DFL);
 	} else if (sig == SIGCONT) {
+		printf("\nLooper handling SIGCONT\n");
 		signal(SIGCONT, SIG_DFL);
 	} else if (sig == SIGINT) {
+		printf("\nLooper handling SIGINT\n");
 		signal(SIGINT, SIG_DFL);
 	}
 
+	fflush(stdout);
 	raise(sig);
 
 	if (sig == SIGTSTP) {
